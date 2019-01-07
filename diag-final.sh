@@ -1,17 +1,19 @@
 #!/bin/bash
-#USAGE : nice -n -20 ./diag.sh
-function usage()
+#	USAGE : nice -n -20 ./diag.sh
+REPORT_PATH="/tmp/"
+usage()
 {
 
     echo -e "*************************************RDK-B DIAGNOSTIC SCRIT********************************"
     echo -e ""
     echo -e "\t-h --help    		= To display help menu"
-    echo -e "\t-u --upload  		= TFTP IP			(upload or skip) "
-    echo -e "\t-p --polling-time  	= Polling time in seconds 	(1800 seconds by default)"
-    echo -e "\t-t --total-time  	= Total time in seconds 	(300 seconds by default)"
+    echo -e "\t-u --upload             = TFTP IP			(upload or skip) "
+    echo -e "\t-p --polling-interval  	= Polling time in seconds 	(300 seconds by default)"
+    echo -e "\t-t --total-time  	= Total time in seconds 	(1800 seconds by default)"
     echo -e ""
     echo -e ""
-    echo -e "			[NOTE]:To run the script use 'nice -n -20 ./diag.sh'"
+    echo -e "           [NOTE]:To run the script use 'nice -n -20 ./diag-final.sh'"
+    echo -e "           [NOTE]:Run this script from the path where the script is located'"
     echo -e ""
     echo -e "*************************************RDK-B DIAGNOSTIC SCRIT********************************"
 }
@@ -65,29 +67,32 @@ log_report(){
 upload="NULL"
 mode="default_mode"
 kb=" KB"
-total_time=30
-polling_interval=5 #5 min
+total_time=1800
+polling_interval=300 
 polling_count=$(($total_time/$polling_interval))
 PROCESS_NAME=""
 PID_NUM=""
 default_flag=0
 count=0
 while [ "$1" != "" ]; do
-    PARAM=`echo $1 | awk -F= '{print $1}'`
-    VALUE=`echo $1 | awk -F= '{print $2}'`
+    PARAM= $1
+    VALUE= $2
     case $PARAM in
         -h | --help)
             usage
             exit
             ;;
         -p | --polling-interval )
-            polling_interval=$VALUE
+            polling_interval=$(($VALUE))
+            shift 
             ;;
         -t | --total-time )
-            total_time=$VALUE
+            total_time=$(($VALUE))
+            shift
             ;;
         -u | --upload)
             upload=$VALUE
+            shift
             ;;
 	*)
 	     mode="special_mode"
@@ -189,6 +194,7 @@ monitor_cpu_util(){
     done
     avg_cpu_util=$(($sum/$polling_count))
     log_report "AVG_CPU_UTIL:" $avg_cpu_util%
+    touch Report1
 }
 monitor_load_avg(){
     load_avg_interval=$((total_time/3))
@@ -201,6 +207,7 @@ monitor_load_avg(){
         log_report "LOAD_AVG:" "\$load_avg"
         i=$(($i-1))
     done
+    touch Report2
 }
 monitor_flash_size(){
     i=$polling_count
@@ -221,7 +228,7 @@ monitor_flash_size(){
     avg_free_ram="$avg_free_ram$kb"
     log_report "AVG_FLASH_MEM_USED:" \$avg_used_ram
     log_report "AVG_FLASH_MEM_FREE:" \$avg_free_ram
-
+    touch Report3
 }
 
 monitor_proc_memory_util(){
@@ -269,6 +276,7 @@ monitor_proc_memory_util(){
         fi
         k=$(($k+1))
     done
+    touch Report5
 }
 monitor_dev_memory_util(){
     i=$polling_count
@@ -289,6 +297,7 @@ monitor_dev_memory_util(){
     avg_mem_free=$(($sum_mem_free/$polling_count))"$kb"
     log_report "AVG_DEV_MEM_USED:" \$avg_mem_used
     log_report "AVG_DEV_MEM_FREE:" \$avg_mem_free
+    touch Report4
 }
 monitor_rss_for_pid(){
     i=$polling_count
@@ -363,6 +372,7 @@ monitor_rss_for_pid(){
             k=$(($k+1))
         done
     fi
+    touch Report6
 }
 monitor_stack_for_pid(){
     i=$polling_count
@@ -436,19 +446,123 @@ monitor_stack_for_pid(){
             k=$(($k+1))
         done
     fi
+    touch Report7
 }
 echo "*************************STARTING   RDK-B DIAGNOSTIC SCRIT*********************************"
 echo ""
 echo -e "\tTotal time		:$total_time sec"
 echo -e "\tPolling time		:$polling_interval sec"
-echo -e "\tUpload			:$upload"
+echo -e "\tUpload		:$upload"
 echo -e "\tMode			:$mode"
 echo ""
 echo "*******************************************************************************************"
-monitor_cpu_util &
-monitor_load_avg &
-monitor_flash_size &
-monitor_dev_memory_util &
-monitor_proc_memory_util &
-monitor_rss_for_pid &
-monitor_stack_for_pid &
+rm Report1 Report2 Report3 Report4 Report5 Report6 Report7
+echo "**********************************************PS command output**********************************************" >> Report
+ps >> Report
+if [[ -f /nvram/syscfg.db ]]; then
+    echo "**********************************************SYSCONFG output**********************************************" >> Report
+    cat /nvram/syscfg.db >> Report
+else
+    echo "**********************************************syscfg not present**********************************************" >> Report
+fi
+if [[ -f /nvram/bbhm_cur_cfg.xml ]]; then
+    echo "**********************************************BBHM output**********************************************" >> Report
+    cat /nvram/bbhm_cur_cfg.xml >> Report
+else
+    echo "**********************************************bbhm_cur_cfg not present**********************************************" >> Report
+fi
+
+if [[ -f /sbin/cfg ]]; then
+    echo "**********************************************WiFi-DB output**********************************************" >> Report
+    cfg -s >> Report
+else
+    echo "**********************************************WiFi-DB not present**********************************************" >> Report
+fi
+
+echo "**********************************************ifconfig erouter0**********************************************" >> Report
+ifconfig erouter0 >> Report
+
+
+if [[ -f /sbin/iwconfig ]]; then
+    echo "iwconfig ath0" >> Report
+    iwconfig ath0 >> Report
+    echo "iwconfig ath1" >> Report
+    iwconfig ath1 >> Report
+    echo "iwconfig ath4" >> Report
+    iwconfig ath4 >> Report
+    echo "iwconfig ath5" >> Report
+    iwconfig ath5 >> Report
+else
+    echo "**********************************************iwconfig not present**********************************************" >> Report
+fi
+ monitor_cpu_util &
+ monitor_load_avg &
+ monitor_flash_size &
+ monitor_dev_memory_util &
+ monitor_proc_memory_util &
+ monitor_rss_for_pid &
+ monitor_stack_for_pid &
+ upload_success=0
+ counter=0
+ task_done=0
+#wait for the Report generation
+echo "Checking for all tasks"
+counter=0
+while : 
+do
+    if [[ -f Report1 ]]; then
+        if [[ -f Report2 ]]; then
+            if [[ -f Report3 ]]; then
+                if [[ -f Report4 ]]; then
+                    if [[ -f Report5 ]]; then
+                        if [[ -f Report6 ]]; then
+                            if [[ -f Report7 ]]; then
+                                task_done=1
+				break
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    fi
+    if [[ $task_done == 1 ]]; then
+        break
+    fi
+    counter=$(($counter+1))
+    sleep 60
+    echo "Waiting for script to finish execution $counter"
+done
+echo "All tasks done"
+
+rm Report1 Report2 Report3 Report4 Report5 Report6 Report7
+up_time=`uptime | sed 's/.*up \([^,]*\), .*/\1/'`
+echo "********************************Finished at $up_time**************************************"
+if [[ $task_done == 1 ]]; then
+    if [[ $upload == NULL ]]; then
+        echo "Report generated successfully!"
+        echo "Exitting the script..."
+        exit 0
+    else
+        echo "Starting TFTP upload..."
+        upload_success=$(tftp -pr Report $upload)
+        upload_success=$?
+        if [[ $upload_success == 0 ]]; then
+            echo "Upload successful!"
+            exit 0
+        else
+            echo "Failed to upload TFTP Error code: $upload_success"
+            exit 1
+        fi
+    fi
+else
+    
+    if [[ $upload == "NULL" ]]; then
+        echo "All tasks did not finish in time"
+        exit 2
+    else
+        echo "All tasks did not finish in time"
+        echo "Cannot upload"
+        exit 3
+    fi
+fi
